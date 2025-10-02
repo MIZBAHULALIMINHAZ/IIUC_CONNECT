@@ -27,6 +27,32 @@ def upload_image(file_obj, folder="iiuc_connect_profiles"):
     except Exception as e:
         raise e
 
+def delete_image(public_id):
+    """Delete file from Cloudinary using public_id"""
+    try:
+        result = cloudinary.uploader.destroy(public_id, invalidate=True)
+        if result.get("result") != "ok":
+            raise Exception(f"Failed to delete image: {result}")
+        return True
+    except CloudinaryError as e:
+        raise Exception(f"Cloudinary delete error: {str(e)}")
+    
+from urllib.parse import urlparse
+
+def extract_public_id(url: str) -> str:
+    """
+    Extract Cloudinary public_id from secure URL
+    Example:
+    https://res.cloudinary.com/demo/image/upload/v1234567890/folder/myfile.jpg
+    -> folder/myfile
+    """
+    path = urlparse(url).path  # /demo/image/upload/v1234567890/folder/myfile.jpg
+    parts = path.split("/")
+    # Last 2 parts are folder/file.extension
+    public_id_with_ext = "/".join(parts[4:])  # folder/myfile.jpg
+    public_id = ".".join(public_id_with_ext.split(".")[:-1])  # remove extension
+    return public_id
+
 # Register
 class RegisterAPIView(APIView):
     permission_classes = (permissions.AllowAny,)
