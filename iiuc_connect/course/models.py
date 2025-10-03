@@ -1,5 +1,5 @@
 import mongoengine as me
-from accounts.models import Department  # ধরে নিচ্ছি Department model আছে
+from accounts.models import Department, User  # ধরে নিচ্ছি Department model আছে
 
 
 class Course(me.Document):
@@ -24,3 +24,34 @@ class Course(me.Document):
 
     def __str__(self):
         return f"{self.course_code} ({self.department.name})"
+
+class CourseRegistration(me.Document):
+    student = me.ReferenceField(User, reverse_delete_rule=me.CASCADE, required=True)
+    course = me.ReferenceField(Course, reverse_delete_rule=me.CASCADE, required=True)
+    status = me.StringField(choices=["pending", "confirmed"], default="pending")
+    section = me.StringField(required=True)
+
+    meta = {
+        "collection": "course_registrations",
+        "indexes": ["student", "course", "status"],
+        "unique_together": [("student", "course")]
+    }
+
+    def __str__(self):
+        return f"{self.student.email} → {self.course.course_code} ({self.status})"
+
+
+class Payment(me.Document):
+    registration = me.ReferenceField(CourseRegistration, reverse_delete_rule=me.CASCADE, required=True)
+    amount = me.FloatField(required=True)
+    method = me.StringField(choices=["bkash", "nagad", "rocket"], required=True)
+    status = me.StringField(choices=["pending", "completed", "failed"], default="pending")
+    transaction_id = me.StringField()
+
+    meta = {
+        "collection": "payments",
+        "indexes": ["registration", "status"],
+    }
+
+    def __str__(self):
+        return f"{self.registration.student.email} → {self.amount} ({self.status})"
