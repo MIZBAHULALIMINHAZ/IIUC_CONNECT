@@ -2,19 +2,34 @@ from rest_framework import serializers
 from .models import Course, CourseRegistration, Payment
 from accounts.models import Department, User
 
-class CourseSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Course
-        fields = [
-            "id", "course_code", "department", "credit_hour",
-            "mid_theory_resources", "mid_previous_solves",
-            "final_resources", "final_previous_solves"
-        ]
+from rest_framework import serializers
+from accounts.models import Department
+from .models import Course
+
+
+class CourseSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    course_code = serializers.CharField()
+    department = serializers.CharField(required=False, allow_null=True)
+    credit_hour = serializers.IntegerField()
+    mid_theory_resources = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+    mid_previous_solves = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+    final_resources = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+    final_previous_solves = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
 
     def create(self, validated_data):
         dept = validated_data.pop("department", None)
-        if isinstance(dept, str):
-            dept = Department.objects(id=dept).first()
+        if dept:
+            if isinstance(dept, str):
+                dept = Department.objects(id=dept).first()
         course = Course(department=dept, **validated_data)
         course.save()
         return course
@@ -29,6 +44,23 @@ class CourseSerializer(serializers.ModelSerializer):
             setattr(instance, key, value)
         instance.save()
         return instance
+
+    def to_representation(self, instance):
+        return {
+            "id": str(instance.id),
+            "course_code": instance.course_code,
+            "department": {
+                "id": str(instance.department.id),
+                "name": instance.department.name,
+            } if instance.department else None,
+            "credit_hour": instance.credit_hour,
+            "mid_theory_resources": instance.mid_theory_resources or [],
+            "mid_previous_solves": instance.mid_previous_solves or [],
+            "final_resources": instance.final_resources or [],
+            "final_previous_solves": instance.final_previous_solves or [],
+    }
+
+
 
 from rest_framework import serializers
 from .models import CourseRegistration, Course, Payment
@@ -49,21 +81,22 @@ class CourseRegistrationSerializer(serializers.Serializer):
 
     def get_course(self, obj):
         return str(obj.course.id)
-
+    
     def create(self, validated_data):
         request = self.context.get('request')
         if not request:
             raise serializers.ValidationError("Request context missing")
 
-        student_id = validated_data.get('student') or request.data.get('student')
+        # ✅ student সবসময় লগইন করা ইউজার থেকে নেওয়া হবে
+        student = request.user  
+
         course_id = validated_data.get('course') or request.data.get('course')
         section = validated_data.get('section')
 
-        student = User.objects(id=student_id).first()
         course = Course.objects(id=course_id).first()
 
-        if not student or not course:
-            raise serializers.ValidationError("Invalid student or course")
+        if not course:
+            raise serializers.ValidationError("Invalid course")
 
         # Prevent duplicate registration
         existing = CourseRegistration.objects(student=student, course=course, section=section).first()

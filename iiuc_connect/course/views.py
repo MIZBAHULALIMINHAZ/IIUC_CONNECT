@@ -143,17 +143,50 @@ from accounts.authentication import JWTAuthentication
 class CourseRegistrationViewSet(viewsets.ViewSet):
     authentication_classes = (JWTAuthentication,)
 
+    # ---------------- GET /api/course/registration/ ----------------
     def list(self, request):
         regs = CourseRegistration.objects(student=request.user)
         serializer = CourseRegistrationSerializer(regs, many=True)
         return Response(serializer.data)
 
+    # ---------------- POST /api/course/registration/ ----------------
     def create(self, request):
-        serializer = CourseRegistrationSerializer(data=request.data, context={'request': request})
+        serializer = CourseRegistrationSerializer(
+            data=request.data, context={'request': request}
+        )
         serializer.is_valid(raise_exception=True)
         reg = serializer.save()
-        return Response(CourseRegistrationSerializer(reg).data, status=status.HTTP_201_CREATED)
+        return Response(
+            CourseRegistrationSerializer(reg).data,
+            status=status.HTTP_201_CREATED
+        )
 
+    # ---------------- PUT /api/course/registration/<pk>/ ----------------
+    def update(self, request, pk=None):
+        reg = CourseRegistration.objects(id=pk, student=request.user).first()
+        if not reg:
+            return Response({"error": "Registration not found"}, status=404)
+
+        serializer = CourseRegistrationSerializer(
+            reg, data=request.data, partial=True, context={'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        reg = serializer.save()
+        return Response(CourseRegistrationSerializer(reg).data)
+
+    # ---------------- DELETE /api/course/registration/<pk>/ ----------------
+    def destroy(self, request, pk=None):
+        reg = CourseRegistration.objects(id=pk, student=request.user).first()
+        if not reg:
+            return Response({"error": "Registration not found"}, status=404)
+
+        reg.delete()
+        return Response({"message": "Course registration deleted"}, status=200)
+    def retrieve(self, request, pk=None):
+        reg = CourseRegistration.objects(id=pk, student=request.user).first()
+        if not reg:
+            return Response({"error": "Registration not found"}, status=404)
+        return Response(CourseRegistrationSerializer(reg).data)
 
 
 # ------------------- Payment -------------------
@@ -184,8 +217,26 @@ class PaymentViewSet(viewsets.ViewSet):
         serializer.is_valid(raise_exception=True)
         payment = serializer.save()
         return Response(PaymentSerializer(payment).data, status=201)
+    def retrieve(self, request, pk=None):
+        payment = Payment.objects(id=pk).first()
+        if not payment:
+            return Response({"error": "Payment not found"}, status=404)
+        return Response(PaymentSerializer(payment).data)
+    def update(self, request, pk=None):
+        payment = Payment.objects(id=pk).first()
+        if not payment:
+            return Response({"error": "Payment not found"}, status=404)
+        serializer = PaymentSerializer(payment, data=request.data, partial=True, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        payment = serializer.save()
+        return Response(PaymentSerializer(payment).data)
 
-
+    def destroy(self, request, pk=None):
+        payment = Payment.objects(id=pk).first()
+        if not payment:
+            return Response({"error": "Payment not found"}, status=404)
+        payment.delete()
+        return Response({"message": "Payment deleted"})
 
 # ------------------- Course Resources API -------------------
 class CourseResourcesAPIView(APIView):

@@ -16,6 +16,7 @@ from .models import User, Department
 from accounts.serializers import DepartmentSerializer, UserActivationSerializer
 from rest_framework.permissions import IsAuthenticated
 from accounts.authentication import JWTAuthentication
+from cloudinary.exceptions import Error as CloudinaryError
 
 def upload_image(file_obj, folder="iiuc_connect_profiles"):
     try:
@@ -171,14 +172,6 @@ class VerifyOTPAPIView(APIView):
         return Response({"message": "Email verified successfully"})
 
 
-import requests
-import base64
-
-def get_image_base64(url):
-    response = requests.get(url)
-    if response.status_code == 200:
-        return base64.b64encode(response.content).decode('utf-8')
-    return None
 
 
 # Profile view (GET/PUT) — uses JWTAuthentication
@@ -190,7 +183,7 @@ class ProfileAPIView(APIView):
 
     def get(self, request):
         user = request.user
-        image_base64 = get_image_base64(user.profile_picture) if user.profile_picture else None
+
         data = {
             "id": str(user.id),
             "student_id": user.student_id,
@@ -199,7 +192,7 @@ class ProfileAPIView(APIView):
             "role": user.role,
             "department": user.department,
             "batch": user.batch,
-            "profile_picture": image_base64,
+            "profile_picture": user.profile_picture,
             "is_verified": user.is_verified,
             "is_active": user.is_active
         }
