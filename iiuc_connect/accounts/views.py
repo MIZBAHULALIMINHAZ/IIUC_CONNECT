@@ -1,22 +1,25 @@
 # accounts/views.py
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from django.utils import timezone
+from django.utils import timezone as dj_timezone
+import cloudinary
 from rest_framework import status, permissions
 from accounts.serializers import (
     DepartmentListSerializer, RegisterSerializer, LoginSerializer, OTPVerifySerializer,
     ProfileUpdateSerializer, ProfileSerializer
 )
-from .models import User
-from .utils import create_and_send_otp
+from .models import User, Department
+from .utils import create_and_send_otp, generate_jwt
 from django.conf import settings
 import jwt
 import datetime
 from cloudinary.uploader import upload as cloudinary_upload
-from .models import User, Department
 from accounts.serializers import DepartmentSerializer, UserActivationSerializer
 from rest_framework.permissions import IsAuthenticated
 from accounts.authentication import JWTAuthentication
 from cloudinary.exceptions import Error as CloudinaryError
+from urllib.parse import urlparse
 
 def upload_image(file_obj, folder="iiuc_connect_profiles"):
     try:
@@ -41,18 +44,13 @@ def delete_image(public_id):
 from urllib.parse import urlparse
 
 def extract_public_id(url: str) -> str:
-    """
-    Extract Cloudinary public_id from secure URL
-    Example:
-    https://res.cloudinary.com/demo/image/upload/v1234567890/folder/myfile.jpg
-    -> folder/myfile
-    """
-    path = urlparse(url).path  # /demo/image/upload/v1234567890/folder/myfile.jpg
+    path = urlparse(url).path
     parts = path.split("/")
-    # Last 2 parts are folder/file.extension
-    public_id_with_ext = "/".join(parts[4:])  # folder/myfile.jpg
-    public_id = ".".join(public_id_with_ext.split(".")[:-1])  # remove extension
-    return public_id
+    if len(parts) < 5:
+        return ""
+    public_id_with_ext = "/".join(parts[4:])
+    return ".".join(public_id_with_ext.split(".")[:-1])
+
 
 # Register
 class RegisterAPIView(APIView):
@@ -80,6 +78,8 @@ class RegisterAPIView(APIView):
             name=data["name"],
             profile_picture="",  # default empty string
             is_active=is_active,
+            role=data.get("role", "student"),
+            department=data.get("department"), 
         )
         user.set_password(data["password"])
 
@@ -105,8 +105,17 @@ class LoginAPIView(APIView):
             return Response(serializer.errors, status=400)
         data = serializer.validated_data
         user = User.objects(email=data["email"]).first()
-        if not user or not user.check_password(data["password"]):
+        if not user:
             return Response({"error": "Invalid credentials"}, status=401)
+
+        if not user.check_password(data["password"]):
+            try:
+                user.otp_count = (user.otp_count or 0) + 1
+            except Exception:
+                user.otp_count = 1
+            user.save()
+            return Response({"error": "Invalid credentials"}, status=401)
+
 
         if user.is_verified != "yes":
             return Response({"error": "Email not verified. Please verify OTP."}, status=403)
@@ -114,25 +123,13 @@ class LoginAPIView(APIView):
             return Response({"error": "Email is from outside. wait for admin activation."}, status=401)
 
         # Build JWT token
-        payload = {
-            "user_id": str(user.id),
-            "exp": datetime.datetime.utcnow() + datetime.timedelta(days=7),
-            "iat": datetime.datetime.utcnow(),
-        }
-        token = jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
-        profile_data = ProfileSerializer({
-            "id": str(user.id),
-            "student_id": user.student_id,
-            "email": user.email,
-            "name": user.name,
-            "role": user.role,
-            "department": user.department,
-            "batch": user.batch,
-            "profile_picture": user.profile_picture,
-            "is_verified": user.is_verified,
-            "is_active": user.is_active
-            
-        }).data
+        try:
+            user.otp_count = 0
+        except Exception:
+            user.otp_count = 0
+        user.save()
+        token = generate_jwt(user.id, days=7)
+        profile_data = ProfileSerializer(user).data
 
         return Response({"token": token, "user": profile_data})
 
@@ -154,17 +151,36 @@ class VerifyOTPAPIView(APIView):
             return Response({"error": "User not found"}, status=404)
 
         if not user.otp or user.otp != otp:
+            try:
+                user.otp_count = (user.otp_count or 0) + 1
+            except Exception:
+                user.otp_count = 1
+            user.save()
             return Response({"error": "Invalid OTP"}, status=400)
 
         # check expiry (10 minutes)
         if not user.otp_created_at:
             return Response({"error": "OTP timestamp missing"}, status=400)
 
+
+        now = timezone.now()
+        
+        try:
+            if timezone.is_naive(user.otp_created_at):
+                from django.utils import timezone as tz_util
+                user_ts = tz_util.make_aware(user.otp_created_at)
+            else:
+                user_ts = user.otp_created_at
+        except Exception:
+            user_ts = user.otp_created_at
+
         ttl = datetime.timedelta(minutes=10)
-        if datetime.datetime.utcnow() > user.otp_created_at + ttl:
+        if now > user_ts + ttl:
             return Response({"error": "OTP expired"}, status=400)
 
+
         # verified
+        user.otp_count = '0'
         user.is_verified = "yes"
         user.otp = None
         user.otp_created_at = None
@@ -172,14 +188,52 @@ class VerifyOTPAPIView(APIView):
         return Response({"message": "Email verified successfully"})
 
 
+# Resend OTP
+# Resend OTP with cooldown protection
+class ResendOTPAPIView(APIView):
+    permission_classes = (permissions.AllowAny,)
 
+    def post(self, request):
+        email = request.data.get("email")
+        if not email:
+            return Response({"error": "Email is required"}, status=400)
 
-# Profile view (GET/PUT) — uses JWTAuthentication
-from rest_framework.permissions import IsAuthenticated
-from accounts.authentication import JWTAuthentication
+        user = User.objects(email=email).first()
+        if not user:
+            return Response({"error": "User not found"}, status=404)
+
+        if user.is_verified == "yes":
+            return Response({"message": "Email already verified."}, status=200)
+
+        # 1-minute cooldown protection
+        if user.otp_created_at:
+            cooldown = datetime.timedelta(minutes=1)
+            now = timezone.now()
+
+            # ensure otp_created_at is aware
+            try:
+                user_ts = user.otp_created_at
+                if timezone.is_naive(user_ts):
+                    from django.utils import timezone as tz_util
+                    user_ts = tz_util.make_aware(user_ts)
+            except Exception:
+                user_ts = user.otp_created_at
+
+            delta = (user_ts + cooldown) - now
+            remaining = int(delta.total_seconds()) if delta.total_seconds() > 0 else 0
+            if remaining > 0:
+                return Response({"error": f"Please wait {remaining} seconds before requesting a new OTP."}, status=429)
+
+        try:
+            create_and_send_otp(user)
+            return Response({"message": "A new OTP has been sent to your email."}, status=200)
+        except Exception as e:
+            return Response({"error": "Failed to resend OTP", "detail": str(e)}, status=500)
+
 
 class ProfileAPIView(APIView):
     authentication_classes = (JWTAuthentication,)
+
 
     def get(self, request):
         user = request.user
@@ -208,9 +262,16 @@ class ProfileAPIView(APIView):
         for field in ["name", "department", "batch"]:
             if field in validated:
                 setattr(user, field, validated[field])
+                
 
         if "profile_picture" in request.FILES:
             try:
+                if user.profile_picture:
+                    try:
+                        old_id = extract_public_id(user.profile_picture)
+                        delete_image(old_id)
+                    except Exception:
+                        pass
                 user.profile_picture = upload_image(request.FILES["profile_picture"])
             except Exception as e:
                 return Response({"error": "Image upload failed", "detail": str(e)}, status=500)
@@ -227,8 +288,8 @@ class DepartmentCreateAPIView(APIView):
     authentication_classes = (JWTAuthentication,)
 
     def post(self, request):
-        # Only admin/manager allowed
-        if request.user.role not in ["admin", "teacher"]:
+        # Only admin allowed
+        if request.user.role != "admin":
             return Response({"error": "Permission denied"}, status=403)
 
         serializer = DepartmentSerializer(data=request.data)

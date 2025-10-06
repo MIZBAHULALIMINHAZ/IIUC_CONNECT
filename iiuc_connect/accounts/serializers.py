@@ -7,6 +7,8 @@ class RegisterSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=200)
     password = serializers.CharField(write_only=True)
     profile_picture = serializers.ImageField(required=False, allow_null=True)
+    role = serializers.ChoiceField(choices=['student', 'teacher'], default='student')
+    department = serializers.CharField(required=False, allow_null=True)
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()

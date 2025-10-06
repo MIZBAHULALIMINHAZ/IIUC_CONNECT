@@ -11,11 +11,20 @@ class Routine(me.Document):
     department = me.ReferenceField(Department, required=True)
     section = me.StringField(required=True)
 
-    meta = {
+    mmeta = {
         "collection": "routines",
-        "indexes": ["course", "teacher", "day", "period", "department", "section"],
+        "indexes": [
+            "course", "teacher", "day", "period", "department", "section",
+            {"fields": ["teacher","day","period","section"], "unique": True},
+            {"fields": ["course","day","period","section"], "unique": True},
+            {"fields": ["room_number","day","period"], "unique": True}
+        ],
         "ordering": ["day", "period"]
-    }
+}
+
 
     def __str__(self):
-        return f"{self.course.course_code} | {self.teacher.name} | {self.day} P{self.period}"
+        course_code = getattr(self.course, "course_code", "UnknownCourse")
+        teacher_name = getattr(self.teacher, "name", "UnknownTeacher")
+        return f"{course_code} | {teacher_name} | {self.day} P{self.period}"
+

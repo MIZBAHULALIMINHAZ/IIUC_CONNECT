@@ -272,3 +272,5 @@ class CourseResourcesAPIView(APIView):
             return Response({"error": "Permission denied"}, status=403)
 
         return Response({"courses": data})
+
+# ------------------- Course List API -------------------

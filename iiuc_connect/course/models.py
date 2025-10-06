@@ -42,7 +42,7 @@ class CourseRegistration(me.Document):
 
 
 class Payment(me.Document):
-    registration = me.ReferenceField(CourseRegistration, reverse_delete_rule=me.CASCADE, required=True)
+    registration = me.ReferenceField(CourseRegistration, reverse_delete_rule=me.CASCADE, required=True,unique=True)
     amount = me.FloatField(required=True)
     method = me.StringField(choices=["bkash", "nagad", "rocket"], required=True)
     status = me.StringField(choices=["pending", "completed", "failed"], default="pending")
@@ -50,7 +50,10 @@ class Payment(me.Document):
 
     meta = {
         "collection": "payments",
-        "indexes": ["registration", "status"],
+        "indexes": [
+            {"fields": ["registration"], "unique": True},
+            "status",
+        ],
     }
 
     def __str__(self):

@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'accounts',
     'course',
     'routine',
+    'event',
 ]
 
 MIDDLEWARE = [

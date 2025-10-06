@@ -1,5 +1,5 @@
 from django.urls import path
-from course.views import CourseViewSet, CourseResourcesAPIView, CourseRegistrationViewSet, PaymentViewSet
+from course.views import CourseViewSet, CourseResourcesAPIView, CourseRegistrationViewSet,  PaymentViewSet
 
 urlpatterns = [
     # Course CRUD

@@ -10,7 +10,7 @@ from .models import Course
 class CourseSerializer(serializers.Serializer):
     id = serializers.CharField(read_only=True)
     course_code = serializers.CharField()
-    department = serializers.CharField(required=False, allow_null=True)
+    department = serializers.CharField(required=True)
     credit_hour = serializers.IntegerField()
     mid_theory_resources = serializers.ListField(
         child=serializers.CharField(), required=False, default=list
